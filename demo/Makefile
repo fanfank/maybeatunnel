@@ -9,7 +9,11 @@ all: $(TARGETS)
 $(TARGETS): %: %.c
 	$(CC) $^ -o $@ $(LIBS)
 
+echo_server:
+	cd echo_server && make
+
 clean:
 	rm -rf $(OBJS) $(TARGETS)
 
 .PHONY : clean
+.PHONY : echo_server
