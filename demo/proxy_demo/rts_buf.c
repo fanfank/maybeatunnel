@@ -9,7 +9,12 @@ struct rts_buf_s {
     size_t size;
     size_t capacity;
 };
-rts_buf_t* rts_buf_init(size_t capacity = 1) {
+
+rts_buf_t* rts_buf_init(size_t capacity) {
+    if (capacity <= 0) {
+        return NULL;
+    }
+
     char* buf = (char*)malloc(capacity);
     if (buf == NULL) {
         return NULL;
@@ -36,12 +41,12 @@ int rts_buf_append(rts_buf_t* rts_buf,
         return -1;
     }
 
-    if (rts_buf == NULL) {
-        rts_buf = rts_buf_init(content_len + 1);
-        if (rts_buf == NULL) {
-            return -2;
-        }
-    }
+    //if (rts_buf == NULL) {
+    //    rts_buf = rts_buf_init(content_len + 1);
+    //    if (rts_buf == NULL) {
+    //        return -2;
+    //    }
+    //}
     
     size_t alloc_len = content_len + 1; //for '\0'
 
