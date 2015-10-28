@@ -41,19 +41,13 @@ int rts_buf_append(rts_buf_t* rts_buf,
         return -1;
     }
 
-    //if (rts_buf == NULL) {
-    //    rts_buf = rts_buf_init(content_len + 1);
-    //    if (rts_buf == NULL) {
-    //        return -2;
-    //    }
-    //}
-    
     size_t alloc_len = content_len + 1; //for '\0'
 
     if (rts_buf->capacity - rts_buf->size < alloc_len) {
         int new_cap = rts_buf->size + alloc_len - rts_buf->capacity 
                 >= rts_buf->capacity ? rts_buf->size + alloc_len :
                     rts_buf->capacity * 2;
+        fprintf(stderr, "re-alloc occurs! new cap = [%d]\n", new_cap);
         char* new_buf = (char*)malloc(new_cap);
         if (new_buf == NULL) {
             return -3;

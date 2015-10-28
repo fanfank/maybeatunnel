@@ -7,6 +7,6 @@ CFLAGS=-g -Wall -I$(UV_PATH)/include
 
 all: proxy
 
-proxy: proxy.c
-	$(CC) $(CFLAGS) -o $@ $^ $(UV_LIB) $(LIBS)
+proxy: proxy.c rts_buf.c
+	$(CC) $(CFLAGS) -o $@ proxy.c $(UV_LIB) $(LIBS)
 

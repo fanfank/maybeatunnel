@@ -16,7 +16,7 @@
 #define DEFAULT_PORT 8888
 #define DEFAULT_BACKLOG 128
 #define DEFAULT_NWORKERS 1
-#define DEFAULT_BUF_SIZE 1310720
+#define DEFAULT_BUF_SIZE 131000 //为简化情况，防止重新分配内存导致原本的指针失效
 
 #define UPSTREAM_HOST "127.0.0.1"
 #define UPSTREAM_PORT 4444
@@ -50,8 +50,8 @@ typedef struct callback_data_s callback_data_t;
 struct callback_data_s {
     stream_conn_t* stream_conn;
     rts_buf_t* buf;
-    int last; //last position of data transmitted to target
-    int pos;  //last position of data that should be transmitted to target
+    int pos;   //last position of data transmitted to target
+    int last;  //last position of data that should be transmitted to target
 };
 
 int main() {
@@ -208,7 +208,7 @@ void downstream_read(uv_stream_t* client, ssize_t nread,
         //简化设计，将内容先全部读到下游数据缓存中
         rts_buf_append(cb_data->buf, buf->base, nread);
 
-        if (cb_data->stream_conn->ready && cb_data->last == cb_data->pos) {
+        if (cb_data->stream_conn->ready && cb_data->pos == cb_data->last) {
             fprintf(stdout, 
                     "start transfering data to upstream\n");
             transfer_stream_data(
@@ -233,14 +233,26 @@ void after_upstream_write(uv_write_t* req, int status) {
     fprintf(stderr, "after_upstream_write called\n");
 
     //check if there is more data to send
-    callback_data_t* from_callback_data = (callback_data_t*)req->handle->data;
-    from_callback_data->last = from_callback_data->pos;
-    if (from_callback_data->pos != from_callback_data->buf->size) {
+    uv_stream_t* to_stream            = req->handle;
+    callback_data_t* to_callback_data = to_stream->data;
+
+    uv_stream_t* from_stream            = to_callback_data->stream_conn->stream;
+    callback_data_t* from_callback_data = from_stream->data;
+
+    from_callback_data->pos = from_callback_data->last;
+    if (from_callback_data->last != from_callback_data->buf->size) {
+        fprintf(stderr, "after_upstream_write transfer not finished, "
+                "continue transfering\n");
+        //from_callback_data->last = from_callback_data->buf->size;
         transfer_stream_data(
-                (uv_stream_t*)req->handle, 
-                (uv_stream_t*)req->send_handle,
+                from_stream,
+                to_stream,
                 after_upstream_write);
-    }
+    } /*else {
+        from_callback_data->buf->size = 0;
+        from_callback_data->last = 0;
+        from_callback_data->pos  = 0;
+    }*/
 
     free(req);
 }
@@ -324,7 +336,7 @@ void on_upstream_connect(uv_connect_t* connect, int status) {
     downstream_cb_data->stream_conn->ready = 1;
 
     fprintf(stdout, "start transfering data to upstream\n");
-    if (downstream_cb_data->last == downstream_cb_data->pos) {
+    if (downstream_cb_data->pos == downstream_cb_data->last) {
         transfer_stream_data(downstream, upstream, after_upstream_write);
     }
     fprintf(stdout, "finish transfering data to upstream\n");
@@ -335,8 +347,7 @@ void on_upstream_connect(uv_connect_t* connect, int status) {
 int transfer_stream_data(uv_stream_t* from, uv_stream_t* to, 
         uv_write_cb wrcb) {
 
-    callback_data_t* from_callback_data
-            = (callback_data_t*)from->data;
+    callback_data_t* from_callback_data = from->data;
     if (from_callback_data == NULL) {
         fprintf(stderr, "from_callback_data is NULL\n");
         return -1;
@@ -347,21 +358,21 @@ int transfer_stream_data(uv_stream_t* from, uv_stream_t* to,
         return -2;
     }
 
-    if (from_callback_data->last != from_callback_data->pos) {
+    if (from_callback_data->pos != from_callback_data->last) {
         //上一次需要发送的数据没有发送完，不能开始发送新数据
         return 0;
     }
 
-    from_callback_data->pos = from_callback_data->buf->size;
+    from_callback_data->last = from_callback_data->buf->size;
 
     uv_write_t* req = (uv_write_t*)malloc(sizeof(uv_write_t));
     uv_buf_t wrbuf  = uv_buf_init(
-            from_callback_data->buf->buf + from_callback_data->last, 
-            from_callback_data->pos - from_callback_data->last);
+            from_callback_data->buf->buf + from_callback_data->pos, 
+            from_callback_data->last - from_callback_data->pos);
 
-    //from_callback_data->buf->buf[from_callback_data->buf->size] = '\0';
+    //from_callback_data->buf->buf[from_callback_data->last] = '\0';
     //fprintf(stdout, "write the following data:\n%s", 
-            //from_callback_data->buf->buf);
+            //from_callback_data->buf->buf + from_callback_data->pos);
 
     //from_callback_data->buf->size = 0;
     uv_write(req, to, &wrbuf, 1, wrcb);
@@ -393,7 +404,7 @@ void upstream_read(uv_stream_t* client, ssize_t nread,
         //简化设计，将内容先全部读到上游数据缓存中
         rts_buf_append(cb_data->buf, buf->base, nread);
 
-        if (cb_data->stream_conn->ready && cb_data->last == cb_data->pos) {
+        if (cb_data->stream_conn->ready && cb_data->pos == cb_data->last) {
             fprintf(stdout, 
                     "start transfering data to downstream\n");
             transfer_stream_data(
@@ -418,14 +429,33 @@ void after_downstream_write(uv_write_t* req, int status) {
     fprintf(stderr, "after_downstream_write called\n");
     
     //check if there is more data to send
-    callback_data_t* from_callback_data = (callback_data_t*)req->handle->data;
-    from_callback_data->last = from_callback_data->pos;
-    if (from_callback_data->pos != from_callback_data->buf->size) {
+    uv_stream_t* to_stream            = req->handle;
+    callback_data_t* to_callback_data = to_stream->data;
+
+    uv_stream_t* from_stream            = to_callback_data->stream_conn->stream;
+    callback_data_t* from_callback_data = from_stream->data;
+
+    fprintf(stderr, "transfered [%d] bytes of data, pos=[%u], last=[%u]\n",
+            (int)from_callback_data->last - (int)from_callback_data->pos,
+            from_callback_data->pos,
+            from_callback_data->last);
+
+    from_callback_data->pos = from_callback_data->last;
+    if (from_callback_data->last != from_callback_data->buf->size) {
+        fprintf(stderr, "after_downstream_write transfer not finished, "
+                "continue transfering [%d] bytes\n", 
+                (int)from_callback_data->buf->size 
+                    - (int)from_callback_data->last);
+        //from_callback_data->last = from_callback_data->buf->size;
         transfer_stream_data(
-                (uv_stream_t*)req->handle, 
-                (uv_stream_t*)req->send_handle,
+                from_stream,
+                to_stream,
                 after_downstream_write);
-    }
+    } /*else {
+        from_callback_data->buf->size = 0;
+        from_callback_data->last = 0;
+        from_callback_data->pos  = 0;
+    }*/
 
     free(req);
 }
