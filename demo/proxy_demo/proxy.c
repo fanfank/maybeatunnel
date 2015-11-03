@@ -1,5 +1,4 @@
 //NOTE: this demo does not gurantee that there is no memory leak
-//  本Demo目前传送纯文本和非HTTPS的请求时可以基本运行，但实际没什么用
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,7 +15,7 @@
 #define DEFAULT_PORT 8888
 #define DEFAULT_BACKLOG 128
 #define DEFAULT_NWORKERS 1
-#define DEFAULT_BUF_SIZE 131000 //为简化情况，防止重新分配内存导致原本的指针失效
+#define DEFAULT_BUF_SIZE 8092 //为简化情况，防止重新分配内存导致原本的指针失效
 
 #define UPSTREAM_HOST "127.0.0.1"
 #define UPSTREAM_PORT 4444
@@ -32,13 +31,20 @@ void on_new_downstream_connection(uv_stream_t* server, int status);
 void alloc_buffer(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf);
 void downstream_read(uv_stream_t* client, ssize_t nread, const uv_buf_t* buf);
 void upstream_read(uv_stream_t* client, ssize_t nread, const uv_buf_t* buf);
-void after_upstream_write(uv_write_t* req, int status);
+void after_upstream_write(uv_write_t* wr_req, int status);
 int init_upstream_connection(uv_stream_t* downstream);
 void on_upstream_connect(uv_connect_t* connect, int status);
 int init_callback_data(uv_stream_t* stream);
 int cleanup_callback_data(uv_stream_t* stream);
 int transfer_stream_data(uv_stream_t* from, uv_stream_t* to, uv_write_cb wrcb);
-void after_downstream_write(uv_write_t* req, int status);
+int simple_transfer_stream_data(uv_stream_t* to, char* buf, int buf_len, uv_write_cb wrcb);
+void after_downstream_write(uv_write_t* wr_req, int status);
+void after_simple_transfer(uv_write_t* wr_req, int status);
+
+typedef struct {
+    uv_write_t req;
+    uv_buf_t buf;
+} write_req_t;
 
 typedef struct stream_conn_s stream_conn_t;
 struct stream_conn_s {
@@ -74,24 +80,25 @@ int main() {
         return 1;
     }
 
-    spawn_processes(DEFAULT_NWORKERS);
+    //spawn_processes(DEFAULT_NWORKERS);
 
-    if (cur_pid == parent_pid) {
-        uv_close((uv_handle_t*)&server, NULL);
-        int ret;
-        int i;
-        for (i = 0; i < DEFAULT_NWORKERS; ++i) {
-            ret = waitpid(g_pids[i], NULL, 0);
-            if (ret == -1) {
-                fprintf(stderr, "Wait for pid %d failed\n", g_pids[i]);
-            } else if (ret == g_pids[i]) {
-                fprintf(stdout, "Child process %d finished\n", g_pids[i]);
-            }
-        }
-        return 0;
-    } else {
-        return uv_run(loop, UV_RUN_DEFAULT);
-    }
+    //if (cur_pid == parent_pid) {
+    //    uv_close((uv_handle_t*)&server, NULL);
+    //    int ret;
+    //    int i;
+    //    for (i = 0; i < DEFAULT_NWORKERS; ++i) {
+    //        ret = waitpid(g_pids[i], NULL, 0);
+    //        if (ret == -1) {
+    //            fprintf(stderr, "Wait for pid %d failed\n", g_pids[i]);
+    //        } else if (ret == g_pids[i]) {
+    //            fprintf(stdout, "Child process %d finished\n", g_pids[i]);
+    //        }
+    //    }
+    //    return 0;
+    //} else {
+    //    return uv_run(loop, UV_RUN_DEFAULT);
+    //}
+    return uv_run(loop, UV_RUN_DEFAULT);
 }
 
 int spawn_processes(int nworkers) {
@@ -135,6 +142,10 @@ int init_callback_data(uv_stream_t* stream) {
 
     stream->data = tmp_data;
 
+    if (tmp_data->buf == NULL) {
+        fprintf(stderr, "init data buf failed!!!!!!!!!!!!!\n");
+    }
+
     return 0;
 }
 
@@ -153,6 +164,7 @@ void on_new_downstream_connection(uv_stream_t* server, int status) {
 
     uv_tcp_init(loop, client);
     if (uv_accept(server, (uv_stream_t*)client) == 0) {
+        uv_tcp_nodelay(client, 1);
         uv_read_start((uv_stream_t*)client, alloc_buffer, downstream_read);
     } else {
         fprintf(stderr, "child [%u] accept connection failed\n", cur_pid);
@@ -162,7 +174,7 @@ void on_new_downstream_connection(uv_stream_t* server, int status) {
 }
 
 void alloc_buffer(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
-    suggested_size += 1;
+    //suggested_size += 1;
     buf->base = (char*)malloc(suggested_size);
     buf->len  = suggested_size;
 }
@@ -181,15 +193,19 @@ void downstream_read(uv_stream_t* client, ssize_t nread,
         fprintf(stdout, "downstream_read finished\n");
 
         if (cb_data->stream_conn) {
-            cleanup_callback_data(cb_data->stream_conn->stream);
-            uv_close((uv_handle_t*)cb_data->stream_conn->stream, NULL);
+            callback_data_t* peer_data = cb_data->stream_conn->stream->data;
+            //peer_data->stream_conn->ready = 0;
+            free(peer_data->stream_conn);
+            peer_data->stream_conn = NULL;
+            //cleanup_callback_data(cb_data->stream_conn->stream);
+            //uv_close((uv_handle_t*)cb_data->stream_conn->stream, NULL);
         }
 
         cleanup_callback_data(client);
         uv_close((uv_handle_t*)client, NULL);
     } else if (nread > 0) {
-        buf->base[nread] = '\0';
-        fprintf(stdout, "%s", buf->base);
+        //buf->base[nread] = '\0';
+        //fprintf(stdout, "%s", buf->base);
 
         if (cb_data->stream_conn == NULL) {
             fprintf(stdout, "cb_data->stream_conn is NULL, init...\n");
@@ -208,29 +224,43 @@ void downstream_read(uv_stream_t* client, ssize_t nread,
         //简化设计，将内容先全部读到下游数据缓存中
         rts_buf_append(cb_data->buf, buf->base, nread);
 
-        if (cb_data->stream_conn->ready && cb_data->pos == cb_data->last) {
-            fprintf(stdout, 
-                    "start transfering data to upstream\n");
+        if (cb_data->stream_conn && cb_data->stream_conn->ready && 
+                cb_data->pos == cb_data->last) {
+            //fprintf(stdout, 
+                    //"start transfering data to upstream\n");
             transfer_stream_data(
                     client, 
                     cb_data->stream_conn->stream, 
                     after_upstream_write);
-            fprintf(stdout, 
-                    "finish transfering data to upstream\n");
+            //fprintf(stdout, 
+                    //"finish transfering data to upstream\n");
+                    
+            //直接使用原本的buf
+            //buf->len = nread;
+            //simple_transfer_stream_data(
+            //    cb_data->stream_conn->stream,
+            //    buf->base,
+            //    nread,
+            //    after_simple_transfer        
+            //);
         }
     }
 
-    if (buf->base) {
+    if (nread > 0) {
+    //if (nread <= 0) {
         free(buf->base);
     }
 }
 
-void after_upstream_write(uv_write_t* req, int status) {
+void after_upstream_write(uv_write_t* wr_req, int status) {
     if (status) {
         fprintf(stderr, "write to upstream error [%s] in process [%u]\n",
                 uv_strerror(status), cur_pid);
     }
     fprintf(stderr, "after_upstream_write called\n");
+
+    write_req_t* wr = (write_req_t*)wr_req;
+    uv_write_t* req = &wr->req;
 
     //check if there is more data to send
     uv_stream_t* to_stream            = req->handle;
@@ -248,13 +278,15 @@ void after_upstream_write(uv_write_t* req, int status) {
                 from_stream,
                 to_stream,
                 after_upstream_write);
-    } /*else {
+    } else {
         from_callback_data->buf->size = 0;
         from_callback_data->last = 0;
         from_callback_data->pos  = 0;
-    }*/
+    }
 
-    free(req);
+    //free(req);
+    //free(wr->buf.base);
+    free(wr);
 }
 
 int init_upstream_connection(uv_stream_t* downstream) {
@@ -321,25 +353,30 @@ void on_upstream_connect(uv_connect_t* connect, int status) {
     if (status < 0) {
         fprintf(stderr, "on_upstream_connect error %s\n", uv_strerror(status));
 
+        free(downstream_cb_data->stream_conn);
+        downstream_cb_data->stream_conn = NULL;
+
         cleanup_callback_data(upstream);
+        uv_close((uv_handle_t*)upstream, NULL);
 
         //原本应该向下游发送503错误然后关闭连接
         //现在为了简化情况，直接关闭与下游的连接
-        cleanup_callback_data(downstream);
-        uv_close((uv_handle_t*)downstream, NULL);
+        //cleanup_callback_data(downstream);
+        //uv_close((uv_handle_t*)downstream, NULL);
     } else {
         fprintf(stdout, "connect to upstream success\n");
     }
     
+    uv_tcp_nodelay((uv_tcp_t*)upstream, 1);
     uv_read_start(upstream, alloc_buffer, upstream_read);
 
     downstream_cb_data->stream_conn->ready = 1;
 
-    fprintf(stdout, "start transfering data to upstream\n");
+    //fprintf(stdout, "start transfering data to upstream\n");
     if (downstream_cb_data->pos == downstream_cb_data->last) {
         transfer_stream_data(downstream, upstream, after_upstream_write);
     }
-    fprintf(stdout, "finish transfering data to upstream\n");
+    //fprintf(stdout, "finish transfering data to upstream\n");
 
     free(connect);
 }
@@ -365,6 +402,15 @@ int transfer_stream_data(uv_stream_t* from, uv_stream_t* to,
 
     from_callback_data->last = from_callback_data->buf->size;
 
+    write_req_t* wr = (write_req_t*)malloc(sizeof(write_req_t));
+    wr->buf = uv_buf_init(
+        &from_callback_data->buf->buf[from_callback_data->pos], 
+        from_callback_data->last - from_callback_data->pos
+    );
+
+    uv_write(&wr->req, to, &wr->buf, 1, wrcb);
+
+    /*
     uv_write_t* req = (uv_write_t*)malloc(sizeof(uv_write_t));
     uv_buf_t wrbuf  = uv_buf_init(
             from_callback_data->buf->buf + from_callback_data->pos, 
@@ -376,6 +422,7 @@ int transfer_stream_data(uv_stream_t* from, uv_stream_t* to,
 
     //from_callback_data->buf->size = 0;
     uv_write(req, to, &wrbuf, 1, wrcb);
+    */
 
     return 0;
 }
@@ -392,8 +439,11 @@ void upstream_read(uv_stream_t* client, ssize_t nread,
 
         fprintf(stdout, "upstream_read finished\n");
 
-        cleanup_callback_data(cb_data->stream_conn->stream);
-        uv_close((uv_handle_t*)cb_data->stream_conn->stream, NULL);
+        //cleanup_callback_data(cb_data->stream_conn->stream);
+        //uv_close((uv_handle_t*)cb_data->stream_conn->stream, NULL);
+        callback_data_t* peer_data = cb_data->stream_conn->stream->data;
+        free(peer_data->stream_conn);
+        peer_data->stream_conn = NULL;
 
         cleanup_callback_data(client);
         uv_close((uv_handle_t*)client, NULL);
@@ -404,30 +454,44 @@ void upstream_read(uv_stream_t* client, ssize_t nread,
         //简化设计，将内容先全部读到上游数据缓存中
         rts_buf_append(cb_data->buf, buf->base, nread);
 
-        if (cb_data->stream_conn->ready && cb_data->pos == cb_data->last) {
-            fprintf(stdout, 
-                    "start transfering data to downstream\n");
+        if (cb_data->stream_conn && cb_data->stream_conn->ready && 
+                cb_data->pos == cb_data->last) {
+            //fprintf(stdout, 
+                    //"start transfering data to downstream\n");
             transfer_stream_data(
                     client, 
                     cb_data->stream_conn->stream, 
                     after_downstream_write);
-            fprintf(stdout, 
-                    "finish transfering data to downstream\n");
+            //fprintf(stdout, 
+                    //"finish transfering data to downstream\n");
+            
+            //直接使用原本的buf
+            //buf->len = nread;
+            //simple_transfer_stream_data(
+            //    cb_data->stream_conn->stream,
+            //    buf->base,
+            //    nread,
+            //    after_simple_transfer        
+            //);
         }
     }
 
-    if (buf->base) {
+    if (nread > 0) {
+    //if (nread <= 0) {
         free(buf->base);
     }
 }
 
-void after_downstream_write(uv_write_t* req, int status) {
+void after_downstream_write(uv_write_t* wr_req, int status) {
     if (status) {
         fprintf(stderr, "write to downstream error [%s] in process [%u]\n",
                 uv_strerror(status), cur_pid);
     }
     fprintf(stderr, "after_downstream_write called\n");
     
+    write_req_t* wr = (write_req_t*)wr_req;
+    uv_write_t* req = &wr->req;
+
     //check if there is more data to send
     uv_stream_t* to_stream            = req->handle;
     callback_data_t* to_callback_data = to_stream->data;
@@ -451,13 +515,15 @@ void after_downstream_write(uv_write_t* req, int status) {
                 from_stream,
                 to_stream,
                 after_downstream_write);
-    } /*else {
+    } else {
         from_callback_data->buf->size = 0;
         from_callback_data->last = 0;
         from_callback_data->pos  = 0;
-    }*/
+    }
 
-    free(req);
+    //free(req);
+    //free(wr->buf.base);
+    free(wr);
 }
 
 int cleanup_callback_data(uv_stream_t* stream) {
@@ -480,4 +546,24 @@ int cleanup_callback_data(uv_stream_t* stream) {
     stream->data = NULL;
 
     return 0;
+}
+
+int simple_transfer_stream_data(uv_stream_t* to, char* buf, int buf_len, uv_write_cb wrcb) {
+    write_req_t* wr = (write_req_t*)malloc(sizeof(write_req_t));
+    wr->buf = uv_buf_init(buf, buf_len);
+
+    uv_write(&wr->req, to, &wr->buf, 1, wrcb);
+    return 0;
+}
+
+void after_simple_transfer(uv_write_t* wr_req, int status) {
+    if (status) {
+        fprintf(stderr, "write to tream error [%s] in process [%u]\n",
+                uv_strerror(status), cur_pid);
+    }
+
+    write_req_t* wr = (write_req_t*)wr_req;
+
+    free(wr->buf.base);
+    free(wr);
 }

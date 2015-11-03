@@ -6,8 +6,8 @@
 typedef struct rts_buf_s rts_buf_t;
 struct rts_buf_s {
     char* buf;
-    size_t size;
-    size_t capacity;
+    int size;
+    int capacity;
 };
 
 rts_buf_t* rts_buf_init(size_t capacity) {
@@ -35,7 +35,7 @@ void rts_buf_free(rts_buf_t* rts_buf) {
 }
 
 int rts_buf_append(rts_buf_t* rts_buf, 
-        char* content, 
+        const char* content, 
         size_t content_len) {
     if (content == NULL) {
         return -1;
@@ -52,13 +52,13 @@ int rts_buf_append(rts_buf_t* rts_buf,
         if (new_buf == NULL) {
             return -3;
         }
-        strncpy(new_buf, rts_buf->buf, rts_buf->size);
+        memcpy(new_buf, rts_buf->buf, rts_buf->size);
         rts_buf->capacity = new_cap;
         free(rts_buf->buf);
         rts_buf->buf = new_buf;
     }
 
-    strncpy(rts_buf->buf + rts_buf->size, content, content_len);
+    memcpy(&rts_buf->buf[rts_buf->size], content, content_len);
     rts_buf->size += content_len;
 
     return 0;
