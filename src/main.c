@@ -20,6 +20,7 @@
 
 #include "conf.h"
 #include "cmd.c"
+#include "crypt.c"
 #include "define.h"
 #include "log.h"
 #include "worker.h"
@@ -40,9 +41,8 @@ int32_t main(int32_t argc, char** argv) {
             "parse_cmd_opt failed, res=[%d]", parse_cmd_opt_res);
 
     // TODO init encryption/decryption method
-    cryption_t* crpt = NULL;
-    int32_t init_cryption_res = init_cryption(g_conf.src_method, crpt);
-    CHECK_RES(init_cryption_res, FATAL, true, -2,
+    cryption_t* crpt = init_cryption(g_conf.cryption_method);
+    CHECK_RES(crpt == NULL, FATAL, true, -2,
             "init_cryption failed, res=[%d]", init_cryption_res);
 
     // prepare to fork children
@@ -71,6 +71,7 @@ int32_t main(int32_t argc, char** argv) {
         on_new_downstream_connection
     );
 
+    //TODO(xuruiqi) write spawn_workers
     int32_t spawn_workers_res = spawn_workers(g_conf.worker_num);
     CHECK_RES(spawn_workers_res, FATAL, true, -4,
             "spawn_workers failed, res=[%d]", spawn_workers_res);

@@ -114,7 +114,6 @@ int32_t parse_cmd_opt(int32_t argc, char** argv) {
 
 int32_t check_global_conf() {
     //check type
-    g_conf.type->append('\0');
     valid_types = {"client", "server", NULL};
     CHECK_RES(
         str_in_array(g_conf.type->buf, valid_types),
@@ -123,7 +122,6 @@ int32_t check_global_conf() {
     );
 
     //check cryption_method
-    g_conf.cryption_method->append('\0');
     valid_cryption_method = {"aes256cbc", "rc4"};
     CHECK_RES(
         str_in_array(g_conf.cryption_method->buf, valid_cryption_method),
