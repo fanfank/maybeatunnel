@@ -1,0 +1,7 @@
+|                                   head                                     |
+| 64bit |       64bit       | 4bit |         1bit       |        1bit        |
+| logid | body_len in bytes | type | body odd bit check | head odd bit check |
+
+|       body       |
+| body_len * 8 bit |
+|   body content   |

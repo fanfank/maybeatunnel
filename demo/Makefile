@@ -7,7 +7,7 @@ TARGETS=$(SRCS:.c=)
 all: $(TARGETS)
 
 $(TARGETS): %: %.c
-	$(CC) $^ -o $@ $(LIBS)
+	$(CC) $^ -g -o $@ $(LIBS)
 
 echo_server:
 	cd echo_server && make

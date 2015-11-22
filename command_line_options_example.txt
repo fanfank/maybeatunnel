@@ -1,0 +1,23 @@
+    -h --help        show this message
+    -c --config      path of config file, options in config file will
+                     overwrite the ones from command line
+    -t --type        set to "client" or "server"
+    --listen_host    default is "0.0.0.0"
+    --listen_port    default is "8888"
+    --target_host    the host of upstream target
+    --target_port    the port of upstream target
+    --worker_num     default is 1, num of workers to handle downstream 
+                     connections
+    --secret_key     secret key for encrypting and decrypting messages.
+                     secret_key must be specified when "--encryption_method"
+                     is not "none"
+    --cryption_method       default is "aes256cbc". encryption algorithm,
+                            select from "none", "aes128cbc", "aes256cbc",
+                            "rc4"
+    --max_connection_num    default is 1000. max connection from downstream 
+                            per worker
+    --downstream_timeout    default is 20, timeout seconds of reading/writing 
+                            downstream
+    --upstream_timeout      default is 20, timeout seconds of reading/writing 
+                            upstream
+    --debug          add this option to print debug info

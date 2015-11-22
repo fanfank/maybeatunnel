@@ -1,3 +1,7 @@
+/**
+ * About IV and padding: https://zh.wikipedia.org/wiki/%E5%9D%97%E5%AF%86%E7%A0%81%E7%9A%84%E5%B7%A5%E4%BD%9C%E6%A8%A1%E5%BC%8F
+ * DEMO from: https://wiki.openssl.org/index.php/EVP_Symmetric_Encryption_and_Decryption
+ */
 #include "openssl/conf.h"
 #include "openssl/evp.h"
 #include "openssl/err.h"
@@ -122,6 +126,8 @@ int main (void)
   /* Encrypt the plaintext */
   ciphertext_len = encrypt (plaintext, strlen ((char *)plaintext), key, iv,
                             ciphertext);
+
+  printf("Ciphertext length is: %d\n", ciphertext_len);
 
   /* Do something useful with the ciphertext here */
   printf("Ciphertext is:\n");
