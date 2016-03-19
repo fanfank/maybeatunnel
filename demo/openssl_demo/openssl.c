@@ -105,7 +105,8 @@ int main (void)
 
   /* Message to be encrypted */
   unsigned char *plaintext =
-                (unsigned char *)"The quick brown fox jumps over the lazy dog";
+                (unsigned char *)"1234567890123456";
+                //(unsigned char *)"The quick brown fox jumps over the lazy dog";
 
   /* Buffer for ciphertext. Ensure the buffer is long enough for the
    * ciphertext which may be longer than the plaintext, dependant on the
@@ -127,6 +128,7 @@ int main (void)
   ciphertext_len = encrypt (plaintext, strlen ((char *)plaintext), key, iv,
                             ciphertext);
 
+  printf("Plaintext length is: %zu\n", strlen((const char*)plaintext));
   printf("Ciphertext length is: %d\n", ciphertext_len);
 
   /* Do something useful with the ciphertext here */
